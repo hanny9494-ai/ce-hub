@@ -8,7 +8,7 @@ import { ContextBuilder } from './context-builder.js';
 import { buildApp } from './api.js';
 import { setupBridge } from './bridge.js';
 
-const DB_PATH = '/Users/jeff/culinary-engine/ce-hub/ce-hub.db';
+const DB_PATH = process.env.CE_HUB_DB_PATH || 'ce-hub.db';
 const PORT = 8750;
 
 async function main() {

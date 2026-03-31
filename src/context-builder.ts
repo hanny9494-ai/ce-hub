@@ -1,8 +1,8 @@
 import { readFileSync, existsSync } from 'node:fs';
 import type { StateStore } from './state-store.js';
 
-const STATUS_PATH = '/Users/jeff/culinary-engine/STATUS.md';
-const CLAUDE_MD_PATH = '/Users/jeff/culinary-engine/CLAUDE.md';
+const STATUS_PATH = process.env.CE_HUB_STATUS_PATH || 'STATUS.md';
+const CLAUDE_MD_PATH = process.env.CE_HUB_CLAUDE_MD_PATH || 'CLAUDE.md';
 
 export class ContextBuilder {
   private store: StateStore;

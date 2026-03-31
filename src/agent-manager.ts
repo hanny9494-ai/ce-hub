@@ -3,8 +3,8 @@ import { join, basename } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { AgentDefinition } from './types.js';
 
-const AGENTS_DIR = '/Users/jeff/culinary-engine/.claude/agents';
-const CWD = '/Users/jeff/culinary-engine';
+const AGENTS_DIR = process.env.CE_HUB_AGENTS_DIR || '.claude/agents';
+const CWD = process.env.CE_HUB_CWD || process.cwd();
 const MOCK = process.env.CE_HUB_MOCK === '1';
 
 function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
