@@ -105,9 +105,12 @@ export class TmuxManager {
       return `python3 scripts/gemini_agent.py --model ${model}`;
     }
 
-    // Default: claude
+    // Default: claude with agent definition for proper tools/permissions
     const claudeModel = model === 'opus' ? 'opus' : model === 'haiku' ? 'haiku' : 'sonnet';
-    return `claude --model ${claudeModel} --dangerously-skip-permissions --append-system-prompt '${escapedAppend}'`;
+    // Use --agent flag if agent .md file exists (gives agent its tools like web_search)
+    const agentFile = join(AGENTS_DIR, `${def.name}.md`);
+    const agentFlag = existsSync(agentFile) ? `--agent ${def.name}` : '';
+    return `claude --model ${claudeModel} --dangerously-skip-permissions ${agentFlag} --append-system-prompt '${escapedAppend}'`;
   }
 
   startAgent(agentName: string): boolean {
