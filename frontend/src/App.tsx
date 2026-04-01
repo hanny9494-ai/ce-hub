@@ -1,27 +1,24 @@
-import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import { Responsive, WidthProvider } from 'react-grid-layout';
-import { AgentTile } from './components/AgentTile';
+import { TerminalTile } from './components/TerminalTile';
 import { SettingsPanel } from './components/SettingsPanel';
-import { useWebSocket } from './hooks/useWebSocket';
 import 'react-grid-layout/css/styles.css';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
 interface AgentInfo { name: string; model: string; description: string; }
 
-// Theme context
 export const ThemeContext = createContext<{ dark: boolean; toggle: () => void }>({ dark: true, toggle: () => {} });
 export const useTheme = () => useContext(ThemeContext);
 
 const THEMES = {
-  dark: { bg: '#0d0d1a', headerBg: '#111122', border: '#222', tileBg: '#0a0a14', tileBorder: '#1a1a2e', tileHeader: '#111122', text: '#ccc', muted: '#555', accent: '#4ade80', input: '#4a6cf7' },
-  light: { bg: '#f0f0f5', headerBg: '#fff', border: '#ddd', tileBg: '#fff', tileBorder: '#ddd', tileHeader: '#f8f8fc', text: '#333', muted: '#999', accent: '#16a34a', input: '#3b5cf5' },
+  dark: { bg: '#0d0d1a', headerBg: '#111122', border: '#222', muted: '#555', accent: '#4ade80' },
+  light: { bg: '#f0f0f5', headerBg: '#fff', border: '#ddd', muted: '#999', accent: '#16a34a' },
 };
 
 function generateLayout(agents: string[]) {
   const layout: any[] = [];
-  const ccIdx = agents.indexOf('cc-lead');
-  if (ccIdx >= 0) layout.push({ i: 'cc-lead', x: 0, y: 0, w: 6, h: 14, minW: 3, minH: 4 });
+  if (agents.includes('cc-lead')) layout.push({ i: 'cc-lead', x: 0, y: 0, w: 6, h: 14, minW: 3, minH: 4 });
   const others = agents.filter(a => a !== 'cc-lead');
   let row = 0;
   for (let idx = 0; idx < others.length; idx++) {
@@ -36,19 +33,59 @@ export default function App() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [dark, setDark] = useState(() => localStorage.getItem('ce-hub-theme') !== 'light');
-  const { connected, messages, streaming, tokenStats, sendMessage, subscribe } = useWebSocket();
+  const [connected, setConnected] = useState(false);
+  const [tokenInfo, setTokenInfo] = useState<{ remaining: string; session: string; total: string }>({ remaining: '', session: '', total: '' });
+  const wsRef = useRef<WebSocket | null>(null);
 
   const theme = dark ? THEMES.dark : THEMES.light;
   const toggle = () => { setDark(d => { localStorage.setItem('ce-hub-theme', d ? 'light' : 'dark'); return !d; }); };
 
+  // WebSocket connection
   useEffect(() => {
-    fetch('/api/agents').then(r => r.json()).then(data => setAgents(Array.isArray(data) ? data : [])).catch(() => {});
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+    const connect = () => {
+      const ws = new WebSocket('ws://localhost:8750');
+      ws.onopen = () => setConnected(true);
+      ws.onclose = () => { setConnected(false); reconnectTimer = setTimeout(connect, 3000); };
+      wsRef.current = ws;
+    };
+    connect();
+    return () => { wsRef.current?.close(); clearTimeout(reconnectTimer); };
+  }, []);
+
+  // Fetch agents
+  useEffect(() => {
+    fetch('/api/agents').then(r => r.json()).then(d => setAgents(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
+
+  // Poll token stats
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const resp = await fetch('/api/stats/tokens');
+        const data = await resp.json();
+        let sessionTotal = 0; let allTotal = 0;
+        for (const [, v] of Object.entries(data) as [string, any][]) {
+          allTotal += v.total_tokens || 0;
+          sessionTotal += v.total_tokens || 0;
+        }
+        // Max plan: 5-hour window tokens (approximate)
+        const maxTokens = 5_000_000; // rough 5h limit
+        const remaining = Math.max(0, maxTokens - allTotal);
+        setTokenInfo({
+          remaining: remaining > 1_000_000 ? `${(remaining / 1_000_000).toFixed(1)}M` : `${(remaining / 1000).toFixed(0)}k`,
+          session: allTotal > 1_000_000 ? `${(allTotal / 1_000_000).toFixed(2)}M` : `${(allTotal / 1000).toFixed(1)}k`,
+          total: allTotal > 1_000_000 ? `${(allTotal / 1_000_000).toFixed(2)}M` : `${(allTotal / 1000).toFixed(1)}k`,
+        });
+      } catch {}
+    }, 5_000);
+    return () => clearInterval(poll);
   }, []);
 
   const allAgentNames = ['cc-lead', ...agents.map(a => a.name).filter(n => n !== 'cc-lead')];
 
   const [layouts, setLayouts] = useState<Record<string, any[]>>(() => {
-    const saved = localStorage.getItem('ce-hub-layouts-v3');
+    const saved = localStorage.getItem('ce-hub-layouts-v4');
     return saved ? JSON.parse(saved) : {};
   });
 
@@ -57,25 +94,33 @@ export default function App() {
 
   const handleLayoutChange = useCallback((_l: any[], all: Record<string, any[]>) => {
     setLayouts(all);
-    localStorage.setItem('ce-hub-layouts-v3', JSON.stringify(all));
+    localStorage.setItem('ce-hub-layouts-v4', JSON.stringify(all));
   }, []);
 
   return (
     <ThemeContext.Provider value={{ dark, toggle }}>
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: theme.bg }}>
+        {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '6px 16px', background: theme.headerBg, borderBottom: `1px solid ${theme.border}`,
-          fontFamily: 'SF Mono, Menlo, monospace', fontSize: 12,
+          fontFamily: 'SF Mono, Menlo, monospace', fontSize: 11,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontWeight: 700, color: theme.accent }}>ce-hub</span>
             <span style={{ color: connected ? theme.accent : '#f87171' }}>
-              {connected ? '● connected' : '○ disconnected'}
+              {connected ? '●' : '○'}
             </span>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ color: theme.muted }}>{allAgentNames.length} agents</span>
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            {tokenInfo.session && (
+              <span style={{ color: theme.muted, fontSize: 10 }}>
+                session: <span style={{ color: '#f7b84a' }}>{tokenInfo.session}</span>
+                {' | '}
+                remaining: <span style={{ color: parseInt(tokenInfo.remaining) > 1000 ? theme.accent : '#f87171' }}>{tokenInfo.remaining}</span>
+              </span>
+            )}
             <button onClick={toggle}
               style={{ background: 'none', border: `1px solid ${theme.border}`, color: theme.muted, borderRadius: 3, padding: '2px 8px', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit' }}>
               {dark ? '☀' : '☾'}
@@ -87,6 +132,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* Terminal Grid */}
         <div style={{ flex: 1, overflow: 'auto', padding: 4 }}>
           <ResponsiveGridLayout
             className="layout"
@@ -100,14 +146,7 @@ export default function App() {
           >
             {allAgentNames.map(name => (
               <div key={name}>
-                <AgentTile
-                  name={name}
-                  messages={messages[name] || []}
-                  streamingText={streaming[name]}
-                  tokens={tokenStats[name]}
-                  onSend={(content) => sendMessage(name, content)}
-                  onSubscribe={() => subscribe(name)}
-                />
+                <TerminalTile name={name} wsRef={wsRef} connected={connected} />
               </div>
             ))}
           </ResponsiveGridLayout>

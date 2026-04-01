@@ -15,6 +15,7 @@ import { MessageRouter } from './message-router.js';
 import { ContextBuilder } from './context-builder.js';
 import { buildApp } from './api.js';
 import { setupBridge } from './bridge.js';
+import { PtyManager } from './pty-manager.js';
 
 const DB_PATH = process.env.CE_HUB_DB_PATH || 'ce-hub.db';
 const PORT = 8750;
@@ -29,6 +30,22 @@ async function main() {
   const contextBuilder = new ContextBuilder(store);
   agentManager.setStore(store);
   agentManager.setRouter(router);
+  const ptyManager = new PtyManager();
+
+  // Wire PTY events
+  router.emitter.on('pty.attach', (data: { agentName: string; ws: any }) => {
+    ptyManager.attach(data.agentName, data.ws);
+    ptyManager.startClaude(data.agentName);
+  });
+  router.emitter.on('pty.input', (data: { agentName: string; data: string }) => {
+    ptyManager.write(data.agentName, data.data);
+  });
+  router.emitter.on('pty.resize', (data: { agentName: string; cols: number; rows: number }) => {
+    ptyManager.resize(data.agentName, data.cols, data.rows);
+  });
+  router.emitter.on('pty.start_claude', (data: { agentName: string }) => {
+    ptyManager.startClaude(data.agentName);
+  });
 
   const app = await buildApp(store, engine, agentManager);
 
@@ -107,6 +124,7 @@ async function main() {
   const shutdown = async (sig: string) => {
     console.log(`[ce-hub] ${sig}, shutting down...`);
     agentManager.shutdown();
+    ptyManager.shutdown();
     await app.close(); store.close(); process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

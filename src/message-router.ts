@@ -42,13 +42,26 @@ export class MessageRouter {
     console.log('[MessageRouter] WebSocket server initialized');
   }
 
-  private handleClientMessage(client: WsClient, msg: { type: string; agentName?: string; content?: string }): void {
+  private handleClientMessage(client: WsClient, msg: { type: string; agentName?: string; content?: string; data?: string; cols?: number; rows?: number }): void {
     switch (msg.type) {
       case 'ping': this.sendTo(client.ws, { type: 'pong' }); break;
       case 'subscribe': if (msg.agentName) { client.subscribedAgents.add(msg.agentName); this.sendTo(client.ws, { type: 'system', message: `Subscribed to ${msg.agentName}` }); } break;
       case 'unsubscribe': if (msg.agentName) { client.subscribedAgents.delete(msg.agentName); } break;
       case 'send_message':
         if (msg.agentName && msg.content) this.emitter.emit(`client.message.${msg.agentName}`, { agentName: msg.agentName, content: msg.content, clientId: client.id });
+        break;
+      // PTY messages
+      case 'pty_attach':
+        if (msg.agentName) this.emitter.emit('pty.attach', { agentName: msg.agentName, ws: client.ws });
+        break;
+      case 'pty_input':
+        if (msg.agentName && msg.data) this.emitter.emit('pty.input', { agentName: msg.agentName, data: msg.data });
+        break;
+      case 'pty_resize':
+        if (msg.agentName && msg.cols && msg.rows) this.emitter.emit('pty.resize', { agentName: msg.agentName, cols: msg.cols, rows: msg.rows });
+        break;
+      case 'pty_start_claude':
+        if (msg.agentName) this.emitter.emit('pty.start_claude', { agentName: msg.agentName });
         break;
     }
   }
