@@ -106,7 +106,7 @@ export class AgentManager {
     console.log(`[AgentManager] spawning persistent process for ${agentName}...`);
     const proc = spawn('claude', [
       '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
-      '--model', 'sonnet', '--verbose',
+      '--model', 'sonnet', '--verbose', '--include-partial-messages',
     ], { cwd: CWD });
 
     const agent: AgentProcess = { proc, buffer: '', pendingResolve: null, pendingReject: null, streamCallback: null };
@@ -121,34 +121,34 @@ export class AgentManager {
         try {
           const msg = JSON.parse(line);
 
-          // Track tokens from rate_limit_event
-          if (msg.type === 'rate_limit_event' && msg.usage) {
-            this.trackTokens(agentName, msg.usage.input_tokens || 0, msg.usage.output_tokens || 0);
-          }
-
+          // Partial message (streaming tokens)
           if (msg.type === 'assistant' && msg.message?.content) {
             const text = msg.message.content
               .filter((b: { type: string }) => b.type === 'text')
               .map((b: { text?: string }) => b.text || '')
               .join('');
-            // Stream chunk to frontend
             if (text && agent.streamCallback) agent.streamCallback(text);
-            if (text && agent.pendingResolve) {
-              const resolve = agent.pendingResolve;
-              agent.pendingResolve = null;
-              agent.pendingReject = null;
-              agent.streamCallback = null;
-              resolve(text);
+          }
+
+          // Final result — resolve promise + track tokens
+          if (msg.type === 'result') {
+            // Track tokens from result.usage
+            if (msg.usage) {
+              this.trackTokens(agentName, msg.usage.input_tokens || 0, msg.usage.output_tokens || 0);
             }
-          } else if (msg.type === 'result' && agent.pendingResolve) {
-            const text = typeof msg.result === 'string' ? msg.result :
-              (msg.result?.content?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') || '');
-            if (text) {
+            // Track cost
+            if (msg.total_cost_usd) {
+              const s = this.tokenStats.get(agentName);
+              if (s) (s as any).cost_usd = ((s as any).cost_usd || 0) + msg.total_cost_usd;
+            }
+
+            const text = typeof msg.result === 'string' ? msg.result : '';
+            if (agent.pendingResolve) {
               const resolve = agent.pendingResolve;
               agent.pendingResolve = null;
               agent.pendingReject = null;
               agent.streamCallback = null;
-              resolve(text);
+              resolve(text || '(empty)');
             }
           }
         } catch {}

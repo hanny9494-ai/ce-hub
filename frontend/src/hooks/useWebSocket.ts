@@ -55,10 +55,10 @@ export function useWebSocket() {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'stream_chunk' && msg.agentName) {
-          // Streaming: accumulate partial content
+          // Streaming: replace with latest partial (each chunk is full text so far)
           setStreaming(prev => ({
             ...prev,
-            [msg.agentName]: (prev[msg.agentName] || '') + (msg.chunk || ''),
+            [msg.agentName]: msg.chunk || '',
           }));
         } else if (msg.type === 'agent_message' && msg.agentName) {
           // Final message: clear streaming, add to messages
