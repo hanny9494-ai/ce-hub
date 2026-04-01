@@ -146,7 +146,7 @@ export default function App() {
           >
             {allAgentNames.map(name => (
               <div key={name}>
-                <TerminalTile name={name} wsRef={wsRef} connected={connected} />
+                <TerminalTile name={name} />
               </div>
             ))}
           </ResponsiveGridLayout>

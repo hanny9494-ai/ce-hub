@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import { z } from 'zod';
 import type { StateStore } from './state-store.js';
 import type { TaskEngine } from './task-engine.js';
+import type { PtyManager } from './pty-manager.js';
 import type { AgentManager } from './agent-manager.js';
 import type { TaskFilter } from './types.js';
 
@@ -15,7 +16,7 @@ const CreateTaskSchema = z.object({
   maxRetries: z.number().int().optional().default(3),
 });
 
-export async function buildApp(store: StateStore, engine: TaskEngine, agentManager: AgentManager) {
+export async function buildApp(store: StateStore, engine: TaskEngine, agentManager: AgentManager, ptyManager?: PtyManager) {
   const app = Fastify({ logger: true });
   const startTime = Date.now();
   await app.register(cors, { origin: true });
@@ -79,6 +80,17 @@ export async function buildApp(store: StateStore, engine: TaskEngine, agentManag
   app.get('/api/documents', async (req) => {
     const agent = (req.query as { agent?: string }).agent;
     return store.getDocuments(agent);
+  });
+
+  // Terminal: start ttyd for agent, return port
+  app.post<{ Params: { name: string } }>('/api/agents/:name/terminal', async (req) => {
+    if (!ptyManager) return { error: 'PTY manager not available' };
+    const port = ptyManager.startAgent(req.params.name);
+    return { port, url: `http://localhost:${port}/${req.params.name}/` };
+  });
+
+  app.get('/api/terminals', async () => {
+    return ptyManager?.listSessions() || [];
   });
 
   app.post<{ Params: { name: string } }>('/api/agents/:name/message', async (req, reply) => {

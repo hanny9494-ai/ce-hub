@@ -32,22 +32,10 @@ async function main() {
   agentManager.setRouter(router);
   const ptyManager = new PtyManager();
 
-  // Wire PTY events
-  router.emitter.on('pty.attach', (data: { agentName: string; ws: any }) => {
-    ptyManager.attach(data.agentName, data.ws);
-    ptyManager.startClaude(data.agentName);
-  });
-  router.emitter.on('pty.input', (data: { agentName: string; data: string }) => {
-    ptyManager.write(data.agentName, data.data);
-  });
-  router.emitter.on('pty.resize', (data: { agentName: string; cols: number; rows: number }) => {
-    ptyManager.resize(data.agentName, data.cols, data.rows);
-  });
-  router.emitter.on('pty.start_claude', (data: { agentName: string }) => {
-    ptyManager.startClaude(data.agentName);
-  });
+  // Start ttyd terminals for key agents (on-demand, not all at once)
+  // Others start when first accessed via API
 
-  const app = await buildApp(store, engine, agentManager);
+  const app = await buildApp(store, engine, agentManager, ptyManager);
 
   // Wire task events to WebSocket broadcast
   engine.emitter.on('task.*.created', (t: unknown) => router.broadcastAll({ type: 'task_update', event: 'created', task: t }));
