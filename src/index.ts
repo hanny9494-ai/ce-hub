@@ -1,4 +1,12 @@
-// Don't modify process.env — claude CLI needs clean env for OAuth
+// Load .env if present
+import { readFileSync, existsSync } from 'node:fs';
+const envPath = new URL('../.env', import.meta.url).pathname;
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
+    const m = line.match(/^(\w+)=(.+)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+  }
+}
 
 import { StateStore } from './state-store.js';
 import { TaskEngine } from './task-engine.js';
@@ -19,6 +27,8 @@ async function main() {
   await agentManager.initialize();
   const router = new MessageRouter(store);
   const contextBuilder = new ContextBuilder(store);
+  agentManager.setStore(store);
+  agentManager.setRouter(router);
 
   const app = await buildApp(store, engine, agentManager);
 
@@ -73,9 +83,14 @@ async function main() {
       return; // Don't send to the agent itself
     }
 
-    // Normal message: send to agent, then check response for dispatches
+    // Normal message: send to agent with streaming, then check response for dispatches
     try {
-      const response = await agentManager.sendMessage(agentName, content);
+      const response = await agentManager.sendMessage(agentName, content, (chunk) => {
+        // Stream partial chunks to frontend
+        router.broadcastToAgent(agentName, {
+          type: 'stream_chunk', agentName, chunk, timestamp: Date.now(),
+        });
+      });
       router.broadcastToAgent(agentName, {
         type: 'agent_message', agentName, role: 'assistant',
         content: response, timestamp: Date.now(),

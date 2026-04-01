@@ -36,7 +36,7 @@ export default function App() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [dark, setDark] = useState(() => localStorage.getItem('ce-hub-theme') !== 'light');
-  const { connected, messages, sendMessage, subscribe } = useWebSocket();
+  const { connected, messages, streaming, tokenStats, sendMessage, subscribe } = useWebSocket();
 
   const theme = dark ? THEMES.dark : THEMES.light;
   const toggle = () => { setDark(d => { localStorage.setItem('ce-hub-theme', d ? 'light' : 'dark'); return !d; }); };
@@ -103,6 +103,8 @@ export default function App() {
                 <AgentTile
                   name={name}
                   messages={messages[name] || []}
+                  streamingText={streaming[name]}
+                  tokens={tokenStats[name]}
                   onSend={(content) => sendMessage(name, content)}
                   onSubscribe={() => subscribe(name)}
                 />

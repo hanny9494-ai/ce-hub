@@ -109,6 +109,73 @@ export class StateStore {
       .map(rowToTask).filter(t => t.depends_on.includes(depId));
   }
 
+  // Conversations
+  getOrCreateConversation(agentName: string): string {
+    const row = this.db.prepare(`SELECT id FROM conversations WHERE agent_name=? AND status='active'`).get(agentName) as { id: string } | undefined;
+    if (row) return row.id;
+    const id = uuidv4();
+    const now = Date.now();
+    this.db.prepare(`INSERT INTO conversations (id,agent_name,status,created_at,updated_at) VALUES (?,?,?,?,?)`).run(id, agentName, 'active', now, now);
+    return id;
+  }
+
+  // Messages
+  addMessage(agentName: string, role: string, content: string, metadata?: Record<string, unknown>): Message {
+    const convId = this.getOrCreateConversation(agentName);
+    const id = uuidv4();
+    const now = Date.now();
+    const tokenEstimate = Math.ceil(content.length / 4);
+    this.db.prepare(
+      `INSERT INTO messages (id,conversation_id,role,content,content_type,token_count,created_at,metadata) VALUES (?,?,?,?,?,?,?,?)`
+    ).run(id, convId, role, content, 'text', tokenEstimate, now, JSON.stringify(metadata ?? {}));
+    return { id, conversation_id: convId, role: role as Message['role'], content, content_type: 'text', token_count: tokenEstimate, created_at: now, metadata: metadata ?? {} };
+  }
+
+  getMessages(agentName: string, limit = 50): Message[] {
+    const convId = this.getOrCreateConversation(agentName);
+    const rows = this.db.prepare(
+      `SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at DESC LIMIT ?`
+    ).all(convId, limit) as Record<string, unknown>[];
+    return rows.reverse().map(r => ({
+      id: r.id as string, conversation_id: r.conversation_id as string,
+      role: r.role as Message['role'], content: r.content as string,
+      content_type: (r.content_type as string) || 'text',
+      token_count: r.token_count as number | null, created_at: r.created_at as number,
+      metadata: parseJson(r.metadata as string, {}),
+    }));
+  }
+
+  getConversationTokenCount(agentName: string): number {
+    const convId = this.getOrCreateConversation(agentName);
+    const row = this.db.prepare(`SELECT SUM(token_count) as total FROM messages WHERE conversation_id=?`).get(convId) as { total: number | null };
+    return row.total ?? 0;
+  }
+
+  // Summarize and archive old messages, keep recent ones
+  consolidateMemory(agentName: string, summary: string, keepRecent = 10): void {
+    const convId = this.getOrCreateConversation(agentName);
+    const messages = this.db.prepare(`SELECT id FROM messages WHERE conversation_id=? ORDER BY created_at ASC`).all(convId) as { id: string }[];
+    if (messages.length <= keepRecent + 1) return;
+    const toArchive = messages.slice(0, messages.length - keepRecent);
+    // Delete old messages
+    const ids = toArchive.map(m => m.id);
+    this.db.prepare(`DELETE FROM messages WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
+    // Insert summary as system message
+    this.addMessage(agentName, 'system', `[Memory Consolidation] ${summary}`, { type: 'memory_consolidation', archived_count: toArchive.length });
+  }
+
+  // Document tracking
+  trackDocument(agentName: string, filePath: string, docType: string): void {
+    this.createEvent({ type: 'document.created', source: agentName, payload: { path: filePath, doc_type: docType } });
+  }
+
+  getDocuments(agentName?: string): CeEvent[] {
+    if (agentName) {
+      return (this.db.prepare(`SELECT * FROM events WHERE type='document.created' AND source=? ORDER BY created_at DESC LIMIT 100`).all(agentName) as Record<string, unknown>[]).map(rowToEvent);
+    }
+    return (this.db.prepare(`SELECT * FROM events WHERE type='document.created' ORDER BY created_at DESC LIMIT 100`).all() as Record<string, unknown>[]).map(rowToEvent);
+  }
+
   // Events
   createEvent(input: CreateEventInput): CeEvent {
     const row = { id: uuidv4(), type: input.type, source: input.source, target: input.target ?? null, payload: JSON.stringify(input.payload ?? {}), created_at: Date.now() };

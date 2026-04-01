@@ -11,13 +11,42 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<Record<string, AgentMessage[]>>({});
+  const [streaming, setStreaming] = useState<Record<string, string>>({});
+  const [tokenStats, setTokenStats] = useState<Record<string, { total_tokens: number; api_calls: number }>>({});
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
 
+  // Load message history from DB on mount
+  const loadHistory = useCallback(async (agentName: string) => {
+    try {
+      const resp = await fetch(`/api/agents/${agentName}/messages?limit=50`);
+      const data = await resp.json();
+      if (Array.isArray(data) && data.length > 0) {
+        setMessages(prev => ({
+          ...prev,
+          [agentName]: data.map((m: any) => ({
+            agentName, role: m.role, content: m.content, timestamp: m.created_at,
+          })),
+        }));
+      }
+    } catch {}
+  }, []);
+
+  // Poll token stats
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const resp = await fetch('/api/stats/tokens');
+        const data = await resp.json();
+        setTokenStats(data);
+      } catch {}
+    }, 10_000);
+    return () => clearInterval(poll);
+  }, []);
+
   const connect = useCallback(() => {
-    // Connect directly to backend WebSocket server
     const ws = new WebSocket('ws://localhost:8750');
 
-    ws.onopen = () => { setConnected(true); console.log('[ws] connected'); };
+    ws.onopen = () => { setConnected(true); };
     ws.onclose = () => {
       setConnected(false);
       reconnectTimer.current = setTimeout(connect, 3000);
@@ -25,10 +54,17 @@ export function useWebSocket() {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === 'agent_message' && msg.agentName) {
+        if (msg.type === 'stream_chunk' && msg.agentName) {
+          // Streaming: accumulate partial content
+          setStreaming(prev => ({
+            ...prev,
+            [msg.agentName]: (prev[msg.agentName] || '') + (msg.chunk || ''),
+          }));
+        } else if (msg.type === 'agent_message' && msg.agentName) {
+          // Final message: clear streaming, add to messages
+          setStreaming(prev => { const n = { ...prev }; delete n[msg.agentName]; return n; });
           setMessages(prev => {
             const existing = prev[msg.agentName] || [];
-            // Dedup: skip if last message has same content and role
             const last = existing[existing.length - 1];
             if (last && last.content === msg.content && last.role === (msg.role || 'assistant')) return prev;
             return {
@@ -39,9 +75,6 @@ export function useWebSocket() {
               }],
             };
           });
-        } else if (msg.type === 'task_update') {
-          // Could dispatch to task state - for now just log
-          console.log('[ws] task update:', msg);
         }
       } catch {}
     };
@@ -55,12 +88,9 @@ export function useWebSocket() {
 
   const sendMessage = useCallback((agentName: string, content: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    // Add user message locally
     setMessages(prev => ({
       ...prev,
-      [agentName]: [...(prev[agentName] || []), {
-        agentName, role: 'user', content, timestamp: Date.now(),
-      }],
+      [agentName]: [...(prev[agentName] || []), { agentName, role: 'user', content, timestamp: Date.now() }],
     }));
     wsRef.current.send(JSON.stringify({ type: 'send_message', agentName, content }));
   }, []);
@@ -69,7 +99,8 @@ export function useWebSocket() {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'subscribe', agentName }));
     }
-  }, []);
+    loadHistory(agentName);
+  }, [loadHistory]);
 
-  return { connected, messages, sendMessage, subscribe };
+  return { connected, messages, streaming, tokenStats, sendMessage, subscribe };
 }

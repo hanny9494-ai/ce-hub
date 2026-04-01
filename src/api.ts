@@ -66,6 +66,21 @@ export async function buildApp(store: StateStore, engine: TaskEngine, agentManag
   // Agent routes
   app.get('/api/agents', async () => agentManager.listAgents());
 
+  // Message history
+  app.get<{ Params: { name: string }; Querystring: { limit?: string } }>('/api/agents/:name/messages', async (req) => {
+    const limit = parseInt(req.query.limit || '50');
+    return store.getMessages(req.params.name, limit);
+  });
+
+  // Token stats
+  app.get('/api/stats/tokens', async () => agentManager.getTokenStats());
+
+  // Documents produced by agents
+  app.get('/api/documents', async (req) => {
+    const agent = (req.query as { agent?: string }).agent;
+    return store.getDocuments(agent);
+  });
+
   app.post<{ Params: { name: string } }>('/api/agents/:name/message', async (req, reply) => {
     const { content } = req.body as { content?: string };
     if (!content) return reply.status(400).send({ error: 'content required' });
