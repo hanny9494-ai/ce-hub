@@ -69,3 +69,16 @@ CREATE TABLE IF NOT EXISTS events (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(type, created_at);
+
+CREATE TABLE IF NOT EXISTS cost_log (
+  id TEXT PRIMARY KEY,
+  agent_name TEXT NOT NULL,
+  model TEXT NOT NULL,
+  input_tokens INTEGER DEFAULT 0,
+  output_tokens INTEGER DEFAULT 0,
+  cost_usd REAL DEFAULT 0,
+  task_id TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cost_agent ON cost_log(agent_name, created_at);
+CREATE INDEX IF NOT EXISTS idx_cost_time ON cost_log(created_at);

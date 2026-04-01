@@ -1,5 +1,6 @@
 // Load .env if present
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 const envPath = new URL('../.env', import.meta.url).pathname;
 if (existsSync(envPath)) {
   for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
@@ -10,120 +11,91 @@ if (existsSync(envPath)) {
 
 import { StateStore } from './state-store.js';
 import { TaskEngine } from './task-engine.js';
-import { AgentManager } from './agent-manager.js';
-import { MessageRouter } from './message-router.js';
-import { ContextBuilder } from './context-builder.js';
+import { TmuxManager } from './tmux-manager.js';
+import { FileWatcher } from './file-watcher.js';
+import { MemoryManager } from './memory-manager.js';
+import { QualityGate } from './quality-gate.js';
+import { CostTracker } from './cost-tracker.js';
+import { Scheduler } from './scheduler.js';
 import { buildApp } from './api.js';
-import { setupBridge } from './bridge.js';
-import { PtyManager } from './pty-manager.js';
 
-const DB_PATH = process.env.CE_HUB_DB_PATH || 'ce-hub.db';
-const PORT = 8750;
+const CWD = process.env.CE_HUB_CWD || process.cwd();
+const DB_PATH = process.env.CE_HUB_DB_PATH || join(CWD, '.ce-hub', 'ce-hub.db');
+const PORT = parseInt(process.env.CE_HUB_PORT || '8750');
 
 async function main() {
-  console.log('[ce-hub] Starting...');
+  console.log('[ce-hub] Starting v2...');
+  console.log(`[ce-hub] CWD: ${CWD}`);
+  console.log(`[ce-hub] DB: ${DB_PATH}`);
+
+  // Ensure .ce-hub directory structure
+  for (const dir of ['dispatch', 'inbox', 'results', 'memory']) {
+    const p = join(CWD, '.ce-hub', dir);
+    if (!existsSync(p)) mkdirSync(p, { recursive: true });
+  }
+
+  // Initialize all modules
   const store = new StateStore(DB_PATH);
+  const tmux = new TmuxManager();
+  tmux.initialize();
+  const fileWatcher = new FileWatcher(tmux, store);
+  const memory = new MemoryManager();
+  memory.initialize();
+  const qualityGate = new QualityGate();
+  qualityGate.initialize();
+  const costTracker = new CostTracker(store);
+  costTracker.initialize();
   const engine = new TaskEngine(store);
-  const agentManager = new AgentManager();
-  await agentManager.initialize();
-  const router = new MessageRouter(store);
-  const contextBuilder = new ContextBuilder(store);
-  agentManager.setStore(store);
-  agentManager.setRouter(router);
-  const ptyManager = new PtyManager();
 
-  // Start ttyd terminals for key agents (on-demand, not all at once)
-  // Others start when first accessed via API
-
-  const app = await buildApp(store, engine, agentManager, ptyManager);
-
-  // Wire task events to WebSocket broadcast
-  engine.emitter.on('task.*.created', (t: unknown) => router.broadcastAll({ type: 'task_update', event: 'created', task: t }));
-  engine.emitter.on('task.*.completed', (r: unknown) => router.broadcastAll({ type: 'task_update', event: 'completed', result: r }));
-  engine.emitter.on('task.*.failed', (e: unknown) => router.broadcastAll({ type: 'task_update', event: 'failed', error: e }));
-
-  // Bridge: intercept dispatch commands (@agent: message)
-  const handleBridge = setupBridge(agentManager, router);
-
-  // Wire frontend messages → check for @dispatch first, then send to agent
-  router.emitter.on('client.message.*', async (data: { agentName: string; content: string; clientId: string }) => {
-    const { agentName, content } = data;
-    console.log(`[ce-hub] Message to ${agentName}: ${content.slice(0, 80)}`);
-
-    // Check if USER input has @agent: dispatch (direct bridge from any tile)
-    const { parseDispatches } = await import('./bridge.js');
-    const userDispatches = parseDispatches(content);
-    if (userDispatches.length > 0) {
-      for (const { targetAgent, message } of userDispatches) {
-        console.log(`[bridge] user → @${targetAgent}: ${message.slice(0, 60)}`);
-        // Show in source tile
-        router.broadcastToAgent(agentName, {
-          type: 'agent_message', agentName, role: 'system',
-          content: `→ dispatched to ${targetAgent}`, timestamp: Date.now(),
-        });
-        // Show in target tile
-        router.broadcastToAgent(targetAgent, {
-          type: 'agent_message', agentName: targetAgent, role: 'system',
-          content: `[from ${agentName}] ${message}`, timestamp: Date.now(),
-        });
-        // Execute on target
-        try {
-          const result = await agentManager.sendMessage(targetAgent, message);
-          router.broadcastToAgent(targetAgent, {
-            type: 'agent_message', agentName: targetAgent, role: 'assistant',
-            content: result, timestamp: Date.now(),
-          });
-          // Report back to source
-          router.broadcastToAgent(agentName, {
-            type: 'agent_message', agentName, role: 'system',
-            content: `[${targetAgent} done] ${result.slice(0, 500)}`, timestamp: Date.now(),
-          });
-        } catch (err) {
-          router.broadcastToAgent(targetAgent, {
-            type: 'agent_message', agentName: targetAgent, role: 'system',
-            content: `Error: ${err}`, timestamp: Date.now(),
-          });
-        }
-      }
-      return; // Don't send to the agent itself
-    }
-
-    // Normal message: send to agent with streaming, then check response for dispatches
-    try {
-      const response = await agentManager.sendMessage(agentName, content, (chunk) => {
-        // Stream partial chunks to frontend
-        router.broadcastToAgent(agentName, {
-          type: 'stream_chunk', agentName, chunk, timestamp: Date.now(),
-        });
-      });
-      router.broadcastToAgent(agentName, {
-        type: 'agent_message', agentName, role: 'assistant',
-        content: response, timestamp: Date.now(),
-      });
-      await handleBridge(agentName, response);
-    } catch (err) {
-      router.broadcastToAgent(agentName, {
-        type: 'agent_message', agentName, role: 'system',
-        content: `Error: ${err}`, timestamp: Date.now(),
-      });
-    }
+  // Scheduler: dispatch tasks to agents via file protocol
+  const scheduler = new Scheduler();
+  scheduler.initialize((agent, task) => {
+    const dispatchDir = join(CWD, '.ce-hub', 'dispatch');
+    writeFileSync(join(dispatchDir, `sched_${Date.now()}.json`), JSON.stringify({
+      id: `sched_${Date.now()}`, from: 'scheduler', to: agent,
+      task, priority: 2, created_at: new Date().toISOString(),
+    }, null, 2));
   });
 
+  // Start file watcher (bridge layer)
+  fileWatcher.start();
+
+  // Build REST API (for monitoring, not for agent communication)
+  const app = await buildApp(store, engine, tmux, costTracker, memory, scheduler);
+
+  // Graceful shutdown
   const shutdown = async (sig: string) => {
     console.log(`[ce-hub] ${sig}, shutting down...`);
-    agentManager.shutdown();
-    ptyManager.shutdown();
-    await app.close(); store.close(); process.exit(0);
+    scheduler.stop();
+    fileWatcher.stop();
+    // Don't kill tmux session — agents keep running
+    await app.close();
+    store.close();
+    console.log('[ce-hub] daemon stopped. tmux session "cehub" still running.');
+    process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
 
-  // Attach WebSocket to Fastify's HTTP server
-  router.initialize(app.server);
+  console.log(`[ce-hub] Daemon ready on http://localhost:${PORT}`);
+  console.log(`[ce-hub] tmux attach -t cehub`);
 
-  console.log(`[ce-hub] Ready on http://localhost:${PORT} (REST + WebSocket)`);
+  // Write status file
+  const statusFile = join(CWD, '.ce-hub', 'status.json');
+  const updateStatus = () => {
+    writeFileSync(statusFile, JSON.stringify({
+      uptime: process.uptime(),
+      agents: tmux.listWindows(),
+      tasks: { total: store.countTasks() },
+      costs: costTracker.getAgentCosts(),
+      schedules: scheduler.listSchedules().length,
+      updated_at: new Date().toISOString(),
+    }, null, 2));
+  };
+  setInterval(updateStatus, 30_000);
+  updateStatus();
 }
 
 main().catch(e => { console.error('[ce-hub] Fatal:', e); process.exit(1); });

@@ -3,18 +3,17 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n hub,ui -c blue,green \"tsx watch src/index.ts\" \"cd frontend && npm run dev\"",
-    "dev:server": "tsx watch src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "daemon": "tsx src/index.ts",
+    "start:all": "tsx src/index.ts & tmux attach -t cehub",
     "build": "tsc",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.87",
     "@fastify/cors": "^9.0.0",
     "better-sqlite3": "^11.0.0",
     "eventemitter2": "^6.4.0",
     "fastify": "^4.28.0",
-    "node-pty": "^1.1.0",
     "p-queue": "^8.0.0",
     "p-retry": "^6.0.0",
     "toposort": "^2.0.2",
