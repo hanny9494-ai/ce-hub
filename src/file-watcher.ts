@@ -1,10 +1,11 @@
-import { watch, readFileSync, readdirSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
+import { watch, readFileSync, writeFileSync, readdirSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TmuxManager } from './tmux-manager.js';
 import type { StateStore } from './state-store.js';
 
-const CWD = process.env.CE_HUB_CWD || process.cwd();
-const CE_HUB_DIR = join(CWD, '.ce-hub');
+// Lazy: read at call time, not module load time (avoids ESM import hoisting issue)
+function getCwd() { return process.env.CE_HUB_CWD || process.cwd(); }
+function getCeHubDir() { return join(getCwd(), '.ce-hub'); }
 
 function ensureDir(dir: string) { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }); }
 
@@ -23,8 +24,8 @@ export class FileWatcher {
   }
 
   start(): void {
-    const dispatchDir = join(CE_HUB_DIR, 'dispatch');
-    const resultsDir = join(CE_HUB_DIR, 'results');
+    const dispatchDir = join(getCeHubDir(), 'dispatch');
+    const resultsDir = join(getCeHubDir(), 'results');
     ensureDir(dispatchDir);
     ensureDir(resultsDir);
 
@@ -83,7 +84,7 @@ export class FileWatcher {
     this.store.createEvent({ type: 'dispatch', source: from, target: to, payload: { task, taskId } });
 
     // Ensure target agent inbox exists
-    const inboxDir = join(CE_HUB_DIR, 'inbox', to);
+    const inboxDir = join(getCeHubDir(), 'inbox', to);
     ensureDir(inboxDir);
 
     // Write task to target agent's inbox
@@ -142,7 +143,7 @@ export class FileWatcher {
     if (taskId) {
       const task = this.store.getTask(taskId);
       if (task && task.from_agent) {
-        const originInbox = join(CE_HUB_DIR, 'inbox', task.from_agent);
+        const originInbox = join(getCeHubDir(), 'inbox', task.from_agent);
         ensureDir(originInbox);
         writeFileSync(join(originInbox, `result_${from}_${Date.now()}.json`), JSON.stringify({
           id: `result_${Date.now()}`, from, type: 'result',

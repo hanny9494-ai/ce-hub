@@ -129,20 +129,61 @@ export class TmuxManager {
     return true;
   }
 
-  // Send a message to agent's tmux window (types it + hits enter)
+  // Send a message to agent's tmux pane or window (types it + hits enter)
   sendMessage(agentName: string, message: string): void {
-    if (!this.isAlive(agentName)) this.startAgent(agentName);
+    // Try pane first (agent running in main window pane), then window
+    const target = this.findAgentTarget(agentName);
+    if (!target) {
+      console.log(`[TmuxManager] ${agentName} not running, starting...`);
+      this.startAgent(agentName);
+      // Wait for startup, then retry
+      setTimeout(() => {
+        const t = this.findAgentTarget(agentName);
+        if (t) {
+          const escaped = message.replace(/'/g, "'\\''").replace(/\n/g, ' ');
+          exec(`tmux send-keys -t '${t}' '${escaped}' Enter`);
+        }
+      }, 5000);
+      return;
+    }
     const escaped = message.replace(/'/g, "'\\''").replace(/\n/g, ' ');
-    exec(`tmux send-keys -t ${SESSION}:${agentName} '${escaped}' Enter`);
+    exec(`tmux send-keys -t '${target}' '${escaped}' Enter`);
+  }
+
+  // Find the tmux target for an agent — checks pane titles in main window first, then windows
+  // Claude Code may prefix pane titles with "✳ " or similar, so we use fuzzy matching
+  private findAgentTarget(agentName: string): string | null {
+    // Check panes in main window (by pane title containing agent name)
+    const panes = exec(`tmux list-panes -t ${SESSION}:main -F '#{pane_title}\t#{pane_id}' 2>/dev/null`).split('\n').filter(Boolean);
+    for (const p of panes) {
+      const sep = p.lastIndexOf('\t');
+      if (sep < 0) continue;
+      const title = p.slice(0, sep);
+      const id = p.slice(sep + 1);
+      if (title === agentName || title.includes(agentName)) return id;
+    }
+    // Check windows by name
+    const windows = exec(`tmux list-windows -t ${SESSION} -F '#{window_name}' 2>/dev/null`).split('\n');
+    if (windows.includes(agentName)) return `${SESSION}:${agentName}`;
+    return null;
   }
 
   isAlive(agentName: string): boolean {
+    // Check panes in main window by title (fuzzy: Claude adds "✳ " prefix)
+    const panes = exec(`tmux list-panes -t ${SESSION}:main -F '#{pane_title}' 2>/dev/null`).split('\n');
+    if (panes.some(t => t === agentName || t.includes(agentName))) return true;
+    // Check windows
     return exec(`tmux list-windows -t ${SESSION} -F '#{window_name}' 2>/dev/null`).split('\n').includes(agentName);
   }
 
   listWindows(): { name: string; alive: boolean }[] {
     const windows = exec(`tmux list-windows -t ${SESSION} -F '#{window_name}' 2>/dev/null`).split('\n').filter(Boolean);
-    return this.getDefinitions().map(d => ({ name: d.name, alive: windows.includes(d.name) }));
+    const paneTitles = exec(`tmux list-panes -t ${SESSION}:main -F '#{pane_title}' 2>/dev/null`).split('\n').filter(Boolean);
+    // Fuzzy match: check if any pane title contains the agent name
+    return this.getDefinitions().map(d => ({
+      name: d.name,
+      alive: windows.includes(d.name) || paneTitles.some(t => t === d.name || t.includes(d.name)),
+    }));
   }
 
   killAgent(agentName: string): void {
