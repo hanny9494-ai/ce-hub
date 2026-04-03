@@ -60,5 +60,6 @@ show_cclead_menu() {
 
 case "$PANE_INDEX" in
   0) show_cclead_menu ;;
+  1) ;; # task board — no menu needed, read-only
   *) show_agent_menu ;;
 esac

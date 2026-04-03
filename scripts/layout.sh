@@ -76,18 +76,53 @@ setup_session() {
     tmux new-window -t "$SESSION" -n main -c "$CE_HUB_CWD"
   fi
 
-  # ── Pane 0 (top): CC Lead — ~55% height ──
+  # Layout build order:
+  # 1. Split pane 0 vertically: top=CC Lead, bottom=agents
+  # 2. Split bottom into 2 agent slots
+  # 3. Split the FULL right edge off as task board (using tmux -f flag for full-width)
+  #
+  # Result:
+  # ┌──────────────────────────────┬──────────┐
+  # │       CC Lead (pane 0)       │  Task    │
+  # │                              │  Board   │
+  # ├──────────────┬───────────────│  (pane 3)│
+  # │ Agent 1 (1)  │ Agent 2 (2)  │          │
+  # └──────────────┴───────────────┴──────────┘
+
+  # Step 1: Split top/bottom — pane 0 = CC Lead, pane 1 = agents area
+  tmux split-window -t "$SESSION:main.0" -v -p 45 -c "$CE_HUB_CWD"
+
+  # Step 2: Split agents area into 2 — pane 1 = agent-1, pane 2 = agent-2
+  tmux split-window -t "$SESSION:main.1" -h -p 50 -c "$CE_HUB_CWD"
+
+  # Step 3: Split right-side task board from pane 0, using -f for full height
+  tmux split-window -t "$SESSION:main.0" -fh -p 15 -c "$CE_HUB_CWD"
+  # -fh = full-height horizontal split. New pane spans full window height on the right.
+  # After this, pane indices shift. The new full-height pane gets the highest index.
+
+  # Identify panes by what they should be
+  # After all splits we have 4 panes. Let's set titles to track them.
+  # Use tmux list-panes to figure out indices after the -fh split
+  sleep 0.3
+
+  # The -fh split creates the new pane at the right edge spanning full height
+  # It becomes the last pane. Let's get its index.
+  local LAST_PANE
+  LAST_PANE=$(tmux list-panes -t "$SESSION:main" -F '#{pane_index}' | tail -1)
+
+  # Task board = last pane (full-height right)
+  tmux send-keys -t "$SESSION:main.${LAST_PANE}" \
+    "export no_proxy=localhost,127.0.0.1 CE_HUB_CWD=$CE_HUB_CWD; python3 $SCRIPTS/task-board.py" Enter
+  tmux select-pane -t "$SESSION:main.${LAST_PANE}" -T "tasks"
+
+  # CC Lead = pane 0 (top-left)
   tmux send-keys -t "$SESSION:main.0" "export no_proxy=localhost,127.0.0.1" Enter
   tmux send-keys -t "$SESSION:main.0" \
     "cd $CE_HUB_CWD && claude --model opus --dangerously-skip-permissions --agent cc-lead" Enter
   tmux select-pane -t "$SESSION:main.0" -T "cc-lead"
 
-  # ── Pane 1 (bottom-left): Agent Slot 1 — 45% height ──
-  tmux split-window -t "$SESSION:main.0" -v -p 45 -c "$CE_HUB_CWD"
+  # Agent slots = pane 1 and pane 2 (bottom-left area)
   start_agent_or_menu 1 "$agent1"
-
-  # ── Pane 2 (bottom-right): Agent Slot 2 — 50% width of bottom ──
-  tmux split-window -t "$SESSION:main.1" -h -p 50 -c "$CE_HUB_CWD"
   start_agent_or_menu 2 "$agent2"
 
   # Focus CC Lead

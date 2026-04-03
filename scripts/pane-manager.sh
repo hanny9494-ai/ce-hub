@@ -62,7 +62,7 @@ close_agent_pane() {
     return 1
   fi
   if [ "$pane_index" = "1" ]; then
-    echo "Cannot close Dashboard pane"
+    echo "Cannot close Task Board pane"
     return 1
   fi
 
