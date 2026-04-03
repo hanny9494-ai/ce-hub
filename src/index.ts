@@ -47,6 +47,7 @@ async function main() {
   const costTracker = new CostTracker(store);
   costTracker.initialize();
   const engine = new TaskEngine(store);
+  fileWatcher.setEngine(engine);
 
   // Scheduler: dispatch tasks to agents via file protocol
   const scheduler = new Scheduler();

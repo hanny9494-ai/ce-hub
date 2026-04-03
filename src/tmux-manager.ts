@@ -3,13 +3,15 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentDefinition } from './types.js';
 
-const CWD = process.env.CE_HUB_CWD || process.cwd();
 const SESSION = 'cehub';
-const AGENTS_DIR = process.env.CE_HUB_AGENTS_DIR || '.claude/agents';
-const MEMORY_DIR = join(CWD, '.ce-hub', 'memory');
+
+// Lazy getters to avoid ESM import hoisting issues
+function getCwd() { return process.env.CE_HUB_CWD || process.cwd(); }
+function getAgentsDir() { return process.env.CE_HUB_AGENTS_DIR || join(getCwd(), '.claude', 'agents'); }
+function getMemoryDir() { return join(getCwd(), '.ce-hub', 'memory'); }
 
 function exec(cmd: string): string {
-  try { return execSync(cmd, { encoding: 'utf-8', timeout: 5000, cwd: CWD }).trim(); } catch { return ''; }
+  try { return execSync(cmd, { encoding: 'utf-8', timeout: 5000, cwd: getCwd() }).trim(); } catch { return ''; }
 }
 
 function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
@@ -78,9 +80,9 @@ export class TmuxManager {
     }
 
     // Load agent definitions
-    if (existsSync(AGENTS_DIR)) {
-      for (const f of readdirSync(AGENTS_DIR).filter((f: string) => f.endsWith('.md') && !f.startsWith('_'))) {
-        const { meta, body } = parseFrontmatter(readFileSync(join(AGENTS_DIR, f), 'utf8'));
+    if (existsSync(getAgentsDir())) {
+      for (const f of readdirSync(getAgentsDir()).filter((f: string) => f.endsWith('.md') && !f.startsWith('_'))) {
+        const { meta, body } = parseFrontmatter(readFileSync(join(getAgentsDir(), f), 'utf8'));
         const name = meta['name'] || f.replace('.md', '');
         this.defs.set(name, {
           name, description: meta['description'] || '',
@@ -107,7 +109,7 @@ export class TmuxManager {
   resolveCommand(def: AgentDefinition): string {
     const model = def.model.toLowerCase();
     // Load agent memory if exists
-    const memoryDir = join(MEMORY_DIR, def.name);
+    const memoryDir = join(getMemoryDir(), def.name);
     let memoryAppend = '';
     if (existsSync(memoryDir)) {
       try {
@@ -130,7 +132,7 @@ export class TmuxManager {
     // Default: claude with agent definition for proper tools/permissions
     const claudeModel = model === 'opus' ? 'opus' : model === 'haiku' ? 'haiku' : 'sonnet';
     // Use --agent flag if agent .md file exists (gives agent its tools like web_search)
-    const agentFile = join(AGENTS_DIR, `${def.name}.md`);
+    const agentFile = join(getAgentsDir(), `${def.name}.md`);
     const agentFlag = existsSync(agentFile) ? `--agent ${def.name}` : '';
     return `claude --model ${claudeModel} --dangerously-skip-permissions ${agentFlag} --append-system-prompt '${escapedAppend}'`;
   }
@@ -147,7 +149,7 @@ export class TmuxManager {
     const cmd = this.resolveCommand(def);
     console.log(`[TmuxManager] starting ${agentName}: ${cmd.slice(0, 80)}...`);
 
-    exec(`tmux new-window -t ${SESSION} -n ${agentName} 'cd ${CWD} && ${cmd}'`);
+    exec(`tmux new-window -t ${SESSION} -n ${agentName} 'cd ${getCwd()} && ${cmd}'`);
     return true;
   }
 

@@ -101,7 +101,7 @@ export class TaskEngine {
     return { dispatched: true, dispatchedAt: new Date().toISOString(), agent: task.to_agent };
   }
 
-  private async triggerDownstream(completedId: string): Promise<void> {
+  async triggerDownstream(completedId: string): Promise<void> {
     for (const t of this.store.getTasksWaitingOnDep(completedId)) {
       if (t.depends_on.every(d => this.store.getTask(d)?.status === 'done')) await this.queueTask(t.id);
     }

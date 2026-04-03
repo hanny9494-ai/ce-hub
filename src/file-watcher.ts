@@ -2,6 +2,7 @@ import { watch, readFileSync, writeFileSync, readdirSync, unlinkSync, existsSync
 import { join } from 'node:path';
 import type { TmuxManager } from './tmux-manager.js';
 import type { StateStore } from './state-store.js';
+import type { TaskEngine } from './task-engine.js';
 
 // Lazy: read at call time, not module load time (avoids ESM import hoisting issue)
 function getCwd() { return process.env.CE_HUB_CWD || process.cwd(); }
@@ -10,19 +11,29 @@ function getCeHubDir() { return join(getCwd(), '.ce-hub'); }
 function ensureDir(dir: string) { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }); }
 
 function readJson(path: string): Record<string, unknown> | null {
-  try { return JSON.parse(readFileSync(path, 'utf-8')); } catch { return null; }
+  try { return JSON.parse(readFileSync(path, 'utf-8')); } catch (err) {
+    console.error(`[FileWatcher] failed to parse JSON: ${path}:`, err);
+    return null;
+  }
 }
 
 export class FileWatcher {
   private tmux: TmuxManager;
   private store: StateStore;
+  private engine: TaskEngine | null = null;
   private watchers: ReturnType<typeof watch>[] = [];
   private pendingResults = new Map<string, { agent: string; dispatchedAt: number; nudgeCount: number }>();
   private nudgeTimer: ReturnType<typeof setInterval> | null = null;
+  private taskTimeoutTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(tmux: TmuxManager, store: StateStore) {
     this.tmux = tmux;
     this.store = store;
+  }
+
+  // Set engine reference (called after both are initialized, avoids circular dep)
+  setEngine(engine: TaskEngine): void {
+    this.engine = engine;
   }
 
   start(): void {
@@ -55,6 +66,9 @@ export class FileWatcher {
 
     // Periodically nudge agents that haven't reported results
     this.nudgeTimer = setInterval(() => this.nudgePending(), 120_000); // every 2 min
+
+    // Periodically timeout stuck tasks
+    this.taskTimeoutTimer = setInterval(() => this.timeoutStuckTasks(), 300_000); // every 5 min
 
     console.log(`[FileWatcher] watching ${dispatchDir} and ${resultsDir}`);
   }
@@ -169,6 +183,13 @@ export class FileWatcher {
       }
     }
 
+    // Trigger downstream DAG tasks
+    if (taskId && status === 'done' && this.engine) {
+      try { this.engine.triggerDownstream(taskId); } catch (err) {
+        console.error(`[FileWatcher] failed to trigger downstream for ${taskId}:`, err);
+      }
+    }
+
     // Clean up inbox file for this task
     if (taskId) {
       const inboxFile = join(getCeHubDir(), 'inbox', from, `${taskId}.json`);
@@ -199,8 +220,24 @@ export class FileWatcher {
     }
   }
 
+  private timeoutStuckTasks(): void {
+    const TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+    const tasks = this.store.listTasks({ status: 'in_progress' as any });
+    const now = Date.now();
+    for (const t of tasks) {
+      const age = now - (t.started_at || t.created_at);
+      if (age > TIMEOUT_MS) {
+        console.warn(`[FileWatcher] task ${t.id} timed out after ${Math.round(age / 60000)}min, marking as failed`);
+        this.store.updateTask(t.id, { status: 'failed', error: `Timed out after ${Math.round(age / 60000)} minutes`, completed_at: now });
+        this.store.createEvent({ type: 'task.timeout', source: 'file-watcher', target: t.to_agent, payload: { taskId: t.id } });
+        this.pendingResults.delete(t.id);
+      }
+    }
+  }
+
   stop(): void {
     if (this.nudgeTimer) clearInterval(this.nudgeTimer);
+    if (this.taskTimeoutTimer) clearInterval(this.taskTimeoutTimer);
     for (const w of this.watchers) w.close();
     this.watchers = [];
   }

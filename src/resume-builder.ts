@@ -53,19 +53,20 @@ export class ResumeBuilder {
     // Write resume prompt to a temp file
     const resumeFile = join(cwd, '.ce-hub', 'resume-prompt.md');
     writeFileSync(resumeFile, resumePrompt);
+    console.log(`[ResumeBuilder] wrote resume prompt to ${resumeFile} (${resumePrompt.length} chars)`);
 
-    // Restart claude in pane 0 with resume context
+    // Restart claude in pane 0 with resume context via --resume-from file
+    // Strategy: start claude, then tell it to read the resume file as first message
     const cmd = `cd ${cwd} && claude --model opus --dangerously-skip-permissions --agent cc-lead`;
-
     exec(`tmux send-keys -t ${SESSION}:main.0 '${cmd}' Enter`);
 
-    // After claude starts, send the resume prompt
+    // After claude starts, send a short instruction to read the full resume file
     setTimeout(() => {
-      // Send resume as first message
-      const escaped = resumePrompt.replace(/'/g, "'\\''").replace(/\n/g, '\\n');
-      exec(`tmux send-keys -t ${SESSION}:main.0 '${escaped.slice(0, 2000)}' Enter`);
-      console.log('[ResumeBuilder] cc-lead restarted with resume prompt');
-    }, 8000);
+      const msg = `Read .ce-hub/resume-prompt.md — it contains your session recovery context with in-progress tasks, recent events, and memory. Then report your status to Jeff.`;
+      const escaped = msg.replace(/'/g, "'\\''");
+      exec(`tmux send-keys -t ${SESSION}:main.0 '${escaped}' Enter`);
+      console.log('[ResumeBuilder] cc-lead restarted, sent resume instruction');
+    }, 10000);
   }
 
   buildResumePrompt(): string {
