@@ -246,9 +246,10 @@ const WIKI_PAGE_HTML = `<!DOCTYPE html>
   <div id="content"></div>
   <p class="meta">CE-Hub Wiki · auto-compiled by Qwen 3.5 Flash</p>
   <script>
-    const raw = document.createElement('textarea');
-    raw.innerHTML = '{{CONTENT_B64}}';
-    document.getElementById('content').innerHTML = marked.parse(atob(raw.innerHTML));
+    const b64 = '{{CONTENT_B64}}';
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const md = new TextDecoder('utf-8').decode(bytes);
+    document.getElementById('content').innerHTML = marked.parse(md);
   </script>
 </body>
 </html>`;
