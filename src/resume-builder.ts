@@ -60,9 +60,13 @@ export class ResumeBuilder {
     const cmd = `cd ${cwd} && claude --model opus --dangerously-skip-permissions --agent cc-lead`;
     exec(`tmux send-keys -t ${SESSION}:main.0 '${cmd}' Enter`);
 
-    // After claude starts, send a short instruction to read the full resume file
+    // After claude starts, point it to the wiki (primary) + resume file (fallback)
     setTimeout(() => {
-      const msg = `Read .ce-hub/resume-prompt.md — it contains your session recovery context with in-progress tasks, recent events, and memory. Then report your status to Jeff.`;
+      const wikiStatus = join(cwd, '.ce-hub', 'wiki', 'STATUS.md');
+      const hasWiki = existsSync(wikiStatus);
+      const msg = hasWiki
+        ? `Read .ce-hub/wiki/STATUS.md for project context, then .ce-hub/resume-prompt.md for recent session state. Report status to Jeff.`
+        : `Read .ce-hub/resume-prompt.md — it contains your session recovery context. Then report status to Jeff.`;
       const escaped = msg.replace(/'/g, "'\\''");
       exec(`tmux send-keys -t ${SESSION}:main.0 '${escaped}' Enter`);
       console.log('[ResumeBuilder] cc-lead restarted, sent resume instruction');

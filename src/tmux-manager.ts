@@ -64,9 +64,15 @@ If you don't write a result file, the task stays stuck as "in_progress" forever.
 Write JSON to .ce-hub/dispatch/:
 {"from":"{your-name}","to":"target-agent","task":"description","priority":1}
 
-### Your memory
-Your persistent memory is in .ce-hub/memory/{your-name}/. It was loaded at startup.
-After completing important work, update your memory files.
+### Project knowledge (wiki)
+All compiled project knowledge is in .ce-hub/wiki/:
+- Project status: .ce-hub/wiki/STATUS.md (read this first when starting work)
+- Your agent context: .ce-hub/wiki/agents/{your-name}.md
+- Architecture: .ce-hub/wiki/ARCHITECTURE.md
+- Decisions: .ce-hub/wiki/DECISIONS.md
+
+The wiki is auto-compiled daily from raw data. Do NOT edit wiki files directly.
+After completing work, write result files — the compiler will update the wiki.
 `.trim();
 
 export class TmuxManager {

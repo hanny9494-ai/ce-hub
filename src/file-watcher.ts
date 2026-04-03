@@ -1,4 +1,4 @@
-import { watch, readFileSync, writeFileSync, readdirSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
+import { watch, readFileSync, writeFileSync, appendFileSync, readdirSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TmuxManager } from './tmux-manager.js';
 import type { StateStore } from './state-store.js';
@@ -9,6 +9,16 @@ function getCwd() { return process.env.CE_HUB_CWD || process.cwd(); }
 function getCeHubDir() { return join(getCwd(), '.ce-hub'); }
 
 function ensureDir(dir: string) { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }); }
+
+function appendRaw(filename: string, data: Record<string, unknown>): void {
+  const rawDir = join(getCeHubDir(), 'raw');
+  ensureDir(rawDir);
+  try {
+    appendFileSync(join(rawDir, filename), JSON.stringify({ ...data, _archived_at: new Date().toISOString() }) + '\n');
+  } catch (err) {
+    console.error(`[FileWatcher] failed to archive raw data to ${filename}:`, err);
+  }
+}
 
 function readJson(path: string): Record<string, unknown> | null {
   try { return JSON.parse(readFileSync(path, 'utf-8')); } catch (err) {
@@ -124,6 +134,9 @@ export class FileWatcher {
       }, 3000);
     }
 
+    // Archive to raw/ for wiki compiler
+    appendRaw('dispatches.jsonl', { id: taskId, from, to, task, priority });
+
     // Track pending result
     this.pendingResults.set(taskId, { agent: to, dispatchedAt: Date.now(), nudgeCount: 0 });
 
@@ -182,6 +195,9 @@ export class FileWatcher {
         }
       }
     }
+
+    // Archive to raw/ for wiki compiler
+    appendRaw('results.jsonl', { from, task_id: taskId, status, summary, output_files: outputFiles });
 
     // Trigger downstream DAG tasks
     if (taskId && status === 'done' && this.engine) {
