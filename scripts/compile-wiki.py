@@ -30,7 +30,7 @@ PROGRESS_FILE = os.path.join(COMPILER_DIR, "progress.json")
 
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 DASHSCOPE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-MODEL = "qwen-plus"  # fast + cheap, good enough for compilation
+MODEL = "qwen3.5-flash"  # Qwen 3.5 Flash — fast, cheap, good for compilation
 
 # Ensure directories
 for d in [RAW_DIR, WIKI_DIR, COMPILER_DIR, os.path.join(WIKI_DIR, "books"), os.path.join(WIKI_DIR, "agents")]:
