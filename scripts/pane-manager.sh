@@ -53,15 +53,15 @@ close_agent_pane() {
     pane_id=$(tmux display-message -t "$SESSION:main" -p '#{pane_id}')
   fi
 
-  # Don't allow closing pane 0 (CC Lead) or pane 1 (Dashboard)
-  local pane_index
-  pane_index=$(tmux display-message -t "$pane_id" -p '#{pane_index}' 2>/dev/null)
+  # Don't allow closing CC Lead or Task Board (check by title, not index)
+  local pane_title
+  pane_title=$(tmux display-message -t "$pane_id" -p '#{pane_title}' 2>/dev/null)
 
-  if [ "$pane_index" = "0" ]; then
+  if echo "$pane_title" | grep -qi "cc-lead\|Claude Code"; then
     echo "Cannot close CC Lead pane"
     return 1
   fi
-  if [ "$pane_index" = "1" ]; then
+  if [ "$pane_title" = "tasks" ]; then
     echo "Cannot close Task Board pane"
     return 1
   fi
@@ -87,9 +87,15 @@ switch_agent_in_pane() {
   local pane_index
   pane_index=$(tmux display-message -t "$pane_id" -p '#{pane_index}' 2>/dev/null)
 
-  # Don't switch pane 0 or 1
-  if [ "$pane_index" = "0" ] || [ "$pane_index" = "1" ]; then
-    echo "Cannot switch CC Lead or Dashboard pane"
+  # Don't switch CC Lead or Task Board
+  local pane_title
+  pane_title=$(tmux display-message -t "$pane_id" -p '#{pane_title}' 2>/dev/null)
+  if echo "$pane_title" | grep -qi "cc-lead\|Claude Code"; then
+    echo "Cannot switch CC Lead pane"
+    return 1
+  fi
+  if [ "$pane_title" = "tasks" ]; then
+    echo "Cannot switch Task Board pane"
     return 1
   fi
 
