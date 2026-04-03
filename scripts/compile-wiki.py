@@ -172,7 +172,7 @@ def read_existing_wiki(filename):
     return ""
 
 
-def compile_status(dispatches, results, git_log, pipeline_progress):
+def compile_status(dispatches, results, git_log, pipeline_progress, project_state=None, cehub_git=None):
     """Compile wiki/STATUS.md."""
     print("[compiler] Compiling STATUS.md...")
 
@@ -202,6 +202,12 @@ def compile_status(dispatches, results, git_log, pipeline_progress):
 
 ## Pipeline progress:
 {pipeline_progress}
+
+## Current project state snapshot (latest):
+{json.dumps(project_state[-1] if project_state else {}, ensure_ascii=False, indent=1)[:3000]}
+
+## ce-hub recent commits:
+{chr(10).join(f"- {c.get('date','')[:10]} {c.get('subject','')}" for c in (cehub_git or [])[:15])}
 
 Generate a concise STATUS.md in Chinese with these sections:
 1. 项目概况 (one paragraph)
@@ -395,7 +401,13 @@ def main():
     git_log = get_git_log(since)
     pipeline_progress = get_pipeline_progress()
 
+    # Additional data sources
+    project_state = read_jsonl_since(os.path.join(RAW_DIR, "project-state.jsonl"), "")  # always read full
+    cehub_git = read_jsonl_since(os.path.join(RAW_DIR, "cehub-git-log.jsonl"), since)
+    decisions_raw = read_jsonl_since(os.path.join(RAW_DIR, "decisions.jsonl"), "")
+
     print(f"[compiler] Raw data: {len(dispatches)} dispatches, {len(results)} results, {len(git_log.splitlines())} commits")
+    print(f"[compiler] Extra: {len(project_state)} state snapshots, {len(cehub_git)} ce-hub commits, {len(decisions_raw)} decisions")
 
     if dry_run:
         print("[compiler] DRY RUN — would compile:")
@@ -415,7 +427,7 @@ def main():
 
     # Compile each wiki page
     write_progress(1, 6)
-    compile_status(dispatches, results, git_log, pipeline_progress)
+    compile_status(dispatches, results, git_log, pipeline_progress, project_state, cehub_git)
 
     write_progress(2, 6)
     compile_decisions(claude_md)
