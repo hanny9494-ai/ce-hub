@@ -1,5 +1,5 @@
 // Load .env if present
-import { readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 const envPath = new URL('../.env', import.meta.url).pathname;
 if (existsSync(envPath)) {
@@ -18,6 +18,7 @@ import { QualityGate } from './quality-gate.js';
 import { CostTracker } from './cost-tracker.js';
 import { Scheduler } from './scheduler.js';
 import { buildApp } from './api.js';
+import { ResumeBuilder } from './resume-builder.js';
 
 const CWD = process.env.CE_HUB_CWD || process.cwd();
 const DB_PATH = process.env.CE_HUB_DB_PATH || join(CWD, '.ce-hub', 'ce-hub.db');
@@ -60,6 +61,10 @@ async function main() {
   // Start file watcher (bridge layer)
   fileWatcher.start();
 
+  // Resume builder: auto-restart CC Lead with context if it crashes
+  const resumeBuilder = new ResumeBuilder(store, tmux);
+  resumeBuilder.startMonitoring();
+
   // Build REST API (for monitoring, not for agent communication)
   const app = await buildApp(store, engine, tmux, costTracker, memory, scheduler);
 
@@ -68,6 +73,7 @@ async function main() {
     console.log(`[ce-hub] ${sig}, shutting down...`);
     scheduler.stop();
     fileWatcher.stop();
+    resumeBuilder.stop();
     // Don't kill tmux session — agents keep running
     await app.close();
     store.close();

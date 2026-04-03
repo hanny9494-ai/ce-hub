@@ -1,4 +1,4 @@
-export type TaskStatus = 'pending' | 'queued' | 'running' | 'done' | 'failed' | 'dead_letter';
+export type TaskStatus = 'pending' | 'queued' | 'running' | 'in_progress' | 'done' | 'failed' | 'dead_letter';
 export type ModelTier = 'opus' | 'flash' | 'ollama';
 export type MessageRole = 'user' | 'assistant' | 'system';
 

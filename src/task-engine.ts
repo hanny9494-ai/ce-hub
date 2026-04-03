@@ -3,6 +3,8 @@ const { EventEmitter2 } = EventEmitter2pkg as any;
 import PQueue from 'p-queue';
 import pRetry from 'p-retry';
 import toposort from 'toposort';
+import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { StateStore } from './state-store.js';
 import type { Task, CreateTaskInput } from './types.js';
 
@@ -58,9 +60,11 @@ export class TaskEngine {
         retries: task.max_retries,
         onFailedAttempt: (e) => { console.warn(`[task-engine] ${taskId} attempt ${e.attemptNumber} failed`); this.store.incrementTaskRetry(taskId); },
       });
-      this.store.updateTask(taskId, { status: 'done', result, completed_at: Date.now() });
-      this.emitter.emit(`task.${taskId}.completed`, result);
-      await this.triggerDownstream(taskId);
+      // Task dispatched to agent — mark as in_progress, not done
+      // FileWatcher.handleResult() will mark it done when agent writes a result file
+      this.store.updateTask(taskId, { status: 'in_progress', result });
+      this.emitter.emit(`task.${taskId}.dispatched`, result);
+      // Downstream triggering happens in FileWatcher.handleResult()
     } catch (err) {
       const t = this.store.getTask(taskId)!;
       const status = t.retry_count >= t.max_retries ? 'dead_letter' : 'failed';
@@ -69,10 +73,32 @@ export class TaskEngine {
     }
   }
 
-  // Phase 1 mock — will be replaced by AgentManager in Phase 2
-  private async executeTask(_taskId: string): Promise<Record<string, unknown>> {
-    await new Promise(r => setTimeout(r, 2000));
-    return { mock: true, completedAt: new Date().toISOString() };
+  // Execute task by writing dispatch file → FileWatcher picks it up → agent runs it
+  // Returns immediately after dispatch; actual completion tracked via result files
+  private async executeTask(taskId: string): Promise<Record<string, unknown>> {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+
+    const ceHubDir = join(process.env.CE_HUB_CWD || process.cwd(), '.ce-hub');
+    const dispatchDir = join(ceHubDir, 'dispatch');
+    if (!existsSync(dispatchDir)) mkdirSync(dispatchDir, { recursive: true });
+
+    const dispatchFile = join(dispatchDir, `task_${taskId}.json`);
+    writeFileSync(dispatchFile, JSON.stringify({
+      id: taskId,
+      from: task.from_agent || 'task-engine',
+      to: task.to_agent,
+      task: task.title,
+      context: task.payload?.context || '',
+      priority: task.priority,
+      created_at: new Date().toISOString(),
+    }, null, 2));
+
+    console.log(`[TaskEngine] dispatched ${taskId} → ${task.to_agent} via file protocol`);
+
+    // Don't wait for completion — FileWatcher handles result files
+    // Mark as in_progress (not done) so the task stays tracked
+    return { dispatched: true, dispatchedAt: new Date().toISOString(), agent: task.to_agent };
   }
 
   private async triggerDownstream(completedId: string): Promise<void> {

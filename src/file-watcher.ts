@@ -17,6 +17,8 @@ export class FileWatcher {
   private tmux: TmuxManager;
   private store: StateStore;
   private watchers: ReturnType<typeof watch>[] = [];
+  private pendingResults = new Map<string, { agent: string; dispatchedAt: number; nudgeCount: number }>();
+  private nudgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(tmux: TmuxManager, store: StateStore) {
     this.tmux = tmux;
@@ -50,6 +52,9 @@ export class FileWatcher {
     // Process any existing dispatch/results files on startup
     this.processExisting(dispatchDir, (f) => this.handleDispatch(f));
     this.processExisting(resultsDir, (f) => this.handleResult(f));
+
+    // Periodically nudge agents that haven't reported results
+    this.nudgeTimer = setInterval(() => this.nudgePending(), 120_000); // every 2 min
 
     console.log(`[FileWatcher] watching ${dispatchDir} and ${resultsDir}`);
   }
@@ -105,6 +110,9 @@ export class FileWatcher {
       }, 3000);
     }
 
+    // Track pending result
+    this.pendingResults.set(taskId, { agent: to, dispatchedAt: Date.now(), nudgeCount: 0 });
+
     // Move dispatch file to processed (or delete)
     try { unlinkSync(filePath); } catch {}
   }
@@ -120,6 +128,9 @@ export class FileWatcher {
     const outputFiles = data.output_files as string[] || [];
 
     console.log(`[FileWatcher] result: ${from} completed ${taskId}: ${status}`);
+
+    // Clear from pending
+    if (taskId) this.pendingResults.delete(taskId);
 
     // Update task in DB
     if (taskId) {
@@ -158,11 +169,38 @@ export class FileWatcher {
       }
     }
 
-    // Move result file to archive (don't delete, keep for audit)
-    // Already in results dir, that's fine
+    // Clean up inbox file for this task
+    if (taskId) {
+      const inboxFile = join(getCeHubDir(), 'inbox', from, `${taskId}.json`);
+      try { unlinkSync(inboxFile); } catch {}
+    }
+  }
+
+  private nudgePending(): void {
+    const now = Date.now();
+    for (const [taskId, info] of this.pendingResults) {
+      const ageMin = (now - info.dispatchedAt) / 60_000;
+      // Only nudge if >2 min old and max 3 nudges
+      if (ageMin < 2 || info.nudgeCount >= 3) continue;
+      if (this.tmux.isAlive(info.agent)) {
+        console.log(`[FileWatcher] nudging ${info.agent} for pending task ${taskId} (${Math.round(ageMin)}min, nudge #${info.nudgeCount + 1})`);
+        this.tmux.sendMessage(info.agent,
+          `REMINDER: You have a pending task (${taskId}). If you have completed it, please write a result file to .ce-hub/results/. ` +
+          `Example: cat > .ce-hub/results/result_${info.agent}_$(date +%s).json << 'EOF'\n` +
+          `{"from":"${info.agent}","task_id":"${taskId}","status":"done","summary":"what you did","output_files":[]}\nEOF`
+        );
+        info.nudgeCount++;
+      }
+      // Give up after 30 min
+      if (ageMin > 30) {
+        console.log(`[FileWatcher] giving up on ${taskId} from ${info.agent} after 30min`);
+        this.pendingResults.delete(taskId);
+      }
+    }
   }
 
   stop(): void {
+    if (this.nudgeTimer) clearInterval(this.nudgeTimer);
     for (const w of this.watchers) w.close();
     this.watchers = [];
   }

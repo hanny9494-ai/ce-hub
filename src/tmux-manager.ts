@@ -25,24 +25,46 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
 
 // File protocol instructions injected into every agent
 const PROTOCOL_PROMPT = `
-## ce-hub Communication Protocol
+## ce-hub Communication Protocol — MANDATORY
 
-You communicate with other agents through files:
+You are managed by ce-hub. All task communication goes through files. Follow these rules strictly.
 
-### Receive tasks
-Check .ce-hub/inbox/{your-name}/ for JSON task files. Read them to get your assignments.
+### When you receive a message starting with "You have a new task in .ce-hub/inbox/"
+1. Read the JSON file(s) in your inbox directory immediately
+2. Execute the task described in the JSON
+3. When done, you MUST write a result file (see below)
 
-### Dispatch to other agents
+### Receiving tasks
+Your inbox: .ce-hub/inbox/{your-name}/
+Read all .json files there. Each contains: {"from", "type", "content", "task_id"}
+
+### MANDATORY: Reporting results
+After completing ANY task from your inbox, you MUST write a result JSON file:
+
+\`\`\`bash
+cat > .ce-hub/results/result_{your-name}_{timestamp}.json << 'RESULT_EOF'
+{
+  "from": "{your-name}",
+  "task_id": "{task_id from inbox file}",
+  "status": "done",
+  "summary": "Brief description of what you accomplished",
+  "output_files": ["list of files you created or modified"]
+}
+RESULT_EOF
+\`\`\`
+
+Use status "done" for success, "failed" for failure (include error in summary), "partial" if incomplete.
+
+THIS IS NOT OPTIONAL. The orchestrator (CC Lead) depends on result files to track progress.
+If you don't write a result file, the task stays stuck as "in_progress" forever.
+
+### Dispatching to other agents
 Write JSON to .ce-hub/dispatch/:
-{"from":"your-name","to":"target-agent","task":"description","priority":1}
-
-### Report results
-When you complete a task, write JSON to .ce-hub/results/:
-{"from":"your-name","task_id":"xxx","status":"done","summary":"what you did","output_files":["paths"]}
+{"from":"{your-name}","to":"target-agent","task":"description","priority":1}
 
 ### Your memory
 Your persistent memory is in .ce-hub/memory/{your-name}/. It was loaded at startup.
-After completing important work, update your memory files to remember key decisions and findings.
+After completing important work, update your memory files.
 `.trim();
 
 export class TmuxManager {
