@@ -6,10 +6,16 @@ function getCwd() { return process.env.CE_HUB_CWD || process.cwd(); }
 const SCHEDULES_FILE = join(getCwd(), '.ce-hub', 'schedules.json');
 
 // System task commands (agent: "system")
-const SYSTEM_TASKS: Record<string, string> = {
-  'compile-wiki': 'python3 scripts/compile-wiki.py',
-  'compile-wiki-full': 'python3 scripts/compile-wiki.py --full',
-};
+function getSystemTasks(): Record<string, string> {
+  const cwd = getCwd();
+  const mindDir = join(cwd, '..', 'culinary-mind');
+  return {
+    'curate-wiki': `cd ${mindDir} && python3 scripts/ingest.py --source ${cwd} && python3 scripts/curate-wiki.py`,
+    'curate-wiki-full': `cd ${mindDir} && python3 scripts/ingest.py --full --source ${cwd} && python3 scripts/curate-wiki.py --full`,
+    'ingest-only': `cd ${mindDir} && python3 scripts/ingest.py --source ${cwd}`,
+    'ingest-conversations': `cd ${mindDir} && python3 scripts/ingest.py --conversations`,
+  };
+}
 
 interface Schedule {
   cron: string;        // simplified: "HH:MM" for daily, or "*/N" for interval minutes
@@ -71,7 +77,7 @@ export class Scheduler {
   private triggerTask(s: Schedule): void {
     if (s.agent === 'system') {
       // System tasks: run script directly, no dispatch
-      const cmd = SYSTEM_TASKS[s.task];
+      const cmd = getSystemTasks()[s.task];
       if (!cmd) {
         console.error(`[Scheduler] unknown system task: ${s.task}`);
         return;
