@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { readFileSync, statSync, existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { StateStore } from './state-store.js';
 import type { TaskEngine } from './task-engine.js';
 import type { TmuxManager } from './tmux-manager.js';
@@ -121,19 +121,27 @@ export async function buildApp(
     return { pages };
   });
 
-  // GET /api/wiki/:page — read a specific wiki page
-  app.get<{ Params: { page: string } }>('/api/wiki/:page', async (req, reply) => {
-    const page = req.params.page.replace(/\.\./g, ''); // prevent traversal
-    const filePath = join(getCeHubDir(), 'wiki', page.endsWith('.md') ? page : `${page}.md`);
-    if (!existsSync(filePath)) return reply.status(404).send({ error: 'Page not found' });
-    return { page, content: readFileSync(filePath, 'utf-8') };
+  // Safe wiki file reader — prevents path traversal
+  const safeWikiRead = (subPath: string): { content: string; resolved: string } | null => {
+    const wikiDir = resolve(getCeHubDir(), 'wiki');
+    const target = resolve(wikiDir, subPath.endsWith('.md') ? subPath : `${subPath}.md`);
+    if (!target.startsWith(wikiDir)) return null; // path traversal blocked
+    if (!existsSync(target)) return null;
+    return { content: readFileSync(target, 'utf-8'), resolved: target };
+  };
+
+  // GET /api/wiki/agents/:name — read agent wiki page (register BEFORE :page)
+  app.get<{ Params: { name: string } }>('/api/wiki/agents/:name', async (req, reply) => {
+    const result = safeWikiRead(join('agents', req.params.name));
+    if (!result) return reply.status(404).send({ error: 'Agent page not found' });
+    return { agent: req.params.name, content: result.content };
   });
 
-  // GET /api/wiki/agents/:name — read agent wiki page
-  app.get<{ Params: { name: string } }>('/api/wiki/agents/:name', async (req, reply) => {
-    const filePath = join(getCeHubDir(), 'wiki', 'agents', `${req.params.name}.md`);
-    if (!existsSync(filePath)) return reply.status(404).send({ error: 'Agent page not found' });
-    return { agent: req.params.name, content: readFileSync(filePath, 'utf-8') };
+  // GET /api/wiki/:page — read a specific wiki page
+  app.get<{ Params: { page: string } }>('/api/wiki/:page', async (req, reply) => {
+    const result = safeWikiRead(req.params.page);
+    if (!result) return reply.status(404).send({ error: 'Page not found' });
+    return { page: req.params.page, content: result.content };
   });
 
   // === Wiki Web Viewer (HTML) ===
@@ -162,21 +170,19 @@ export async function buildApp(
   app.get('/wiki/*', async (req, reply) => {
     const rawPath = (req.params as any)['*'] as string;
     if (!rawPath) return reply.redirect('/wiki/');
-    const safePath = rawPath.replace(/\.\./g, '');
-    const filePath = join(getCeHubDir(), 'wiki', safePath);
-    if (!existsSync(filePath)) return reply.status(404).type('text/html').send('<h1>404</h1><p>Page not found</p><a href="/wiki/">← Back to wiki</a>');
+    const wikiDir = resolve(getCeHubDir(), 'wiki');
+    const filePath = resolve(wikiDir, rawPath);
+    if (!filePath.startsWith(wikiDir) || !existsSync(filePath)) {
+      return reply.status(404).type('text/html').send('<h1>404</h1><p>Page not found</p><a href="/wiki/">← Back to wiki</a>');
+    }
 
     const md = readFileSync(filePath, 'utf-8');
-    const title = safePath.replace('.md', '');
+    const title = rawPath.replace('.md', '');
     const b64 = Buffer.from(md).toString('base64');
     reply.type('text/html').send(WIKI_PAGE_HTML.replace('{{TITLE}}', title).replace('{{CONTENT_B64}}', b64));
   });
 
   return app;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 const WIKI_INDEX_HTML = `<!DOCTYPE html>

@@ -1,18 +1,18 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const CWD = process.env.CE_HUB_CWD || process.cwd();
-const MEMORY_DIR = join(CWD, '.ce-hub', 'memory');
+function getCwd() { return process.env.CE_HUB_CWD || process.cwd(); }
+function getMemoryDir() { return join(getCwd(), '.ce-hub', 'memory'); }
 
 export class MemoryManager {
   initialize(): void {
-    if (!existsSync(MEMORY_DIR)) mkdirSync(MEMORY_DIR, { recursive: true });
-    console.log(`[MemoryManager] memory dir: ${MEMORY_DIR}`);
+    if (!existsSync(getMemoryDir())) mkdirSync(getMemoryDir(), { recursive: true });
+    console.log(`[MemoryManager] memory dir: ${getMemoryDir()}`);
   }
 
   // Get all memory files for an agent
   getMemory(agentName: string): Record<string, string> {
-    const dir = join(MEMORY_DIR, agentName);
+    const dir = join(getMemoryDir(), agentName);
     if (!existsSync(dir)) return {};
     const result: Record<string, string> = {};
     for (const f of readdirSync(dir).filter(f => f.endsWith('.md'))) {
@@ -30,7 +30,7 @@ export class MemoryManager {
 
   // Update a specific memory file
   updateMemory(agentName: string, filename: string, content: string): void {
-    const dir = join(MEMORY_DIR, agentName);
+    const dir = join(getMemoryDir(), agentName);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, filename.endsWith('.md') ? filename : `${filename}.md`), content);
     console.log(`[MemoryManager] updated ${agentName}/${filename}`);
@@ -38,7 +38,7 @@ export class MemoryManager {
 
   // Append to a memory file
   appendMemory(agentName: string, filename: string, entry: string): void {
-    const dir = join(MEMORY_DIR, agentName);
+    const dir = join(getMemoryDir(), agentName);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const path = join(dir, filename.endsWith('.md') ? filename : `${filename}.md`);
     const existing = existsSync(path) ? readFileSync(path, 'utf-8') : '';
@@ -53,9 +53,9 @@ export class MemoryManager {
   }
 
   listAgentsWithMemory(): string[] {
-    if (!existsSync(MEMORY_DIR)) return [];
-    return readdirSync(MEMORY_DIR).filter(f => {
-      const dir = join(MEMORY_DIR, f);
+    if (!existsSync(getMemoryDir())) return [];
+    return readdirSync(getMemoryDir()).filter(f => {
+      const dir = join(getMemoryDir(), f);
       try { return statSync(dir).isDirectory(); } catch { return false; }
     });
   }

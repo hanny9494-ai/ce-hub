@@ -58,8 +58,12 @@ show_cclead_menu() {
     "Restart"     r  "send-keys -t $SESSION:main.0 C-c ; run-shell -b 'sleep 1 && tmux send-keys -t $SESSION:main.0 \"cd $CE_HUB_CWD && claude --model opus --dangerously-skip-permissions --agent cc-lead\" Enter'"
 }
 
-case "$PANE_INDEX" in
-  0) show_cclead_menu ;;
-  1) ;; # task board — no menu needed, read-only
-  *) show_agent_menu ;;
+# Route by pane title (more reliable than index after -fh splits)
+case "$PANE_TITLE" in
+  *cc-lead*|*"CC Lead"*|*"Claude Code"*|*"Clear session"*)
+    show_cclead_menu ;;
+  tasks)
+    ;; # task board — read-only, no menu
+  *)
+    show_agent_menu ;;
 esac

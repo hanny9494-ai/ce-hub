@@ -3,8 +3,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { StateStore } from './state-store.js';
 
-const CWD = process.env.CE_HUB_CWD || process.cwd();
-const GATES_FILE = join(CWD, '.ce-hub', 'quality-gates.json');
+function getCwd() { return process.env.CE_HUB_CWD || process.cwd(); }
+function getGatesFile() { return join(getCwd(), '.ce-hub', 'quality-gates.json'); }
 
 interface GateRule {
   check: string;                    // command or @agent dispatch
@@ -17,8 +17,8 @@ export class QualityGate {
   private gates: Record<string, GateRule> = {};
 
   initialize(): void {
-    if (existsSync(GATES_FILE)) {
-      try { this.gates = JSON.parse(readFileSync(GATES_FILE, 'utf-8')); } catch {}
+    if (existsSync(getGatesFile())) {
+      try { this.gates = JSON.parse(readFileSync(getGatesFile(), 'utf-8')); } catch {}
     }
     console.log(`[QualityGate] loaded ${Object.keys(this.gates).length} gate rules`);
   }
@@ -37,7 +37,7 @@ export class QualityGate {
     }
 
     try {
-      const output = execSync(cmd, { cwd: CWD, encoding: 'utf-8', timeout: 60_000 });
+      const output = execSync(cmd, { cwd: getCwd(), encoding: 'utf-8', timeout: 60_000 });
       // Try to parse output as JSON for criteria checking
       try {
         const metrics = JSON.parse(output);

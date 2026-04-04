@@ -84,7 +84,7 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  await app.listen({ port: PORT, host: '0.0.0.0' });
+  await app.listen({ port: PORT, host: '127.0.0.1' });
 
   console.log(`[ce-hub] Daemon ready on http://localhost:${PORT}`);
   console.log(`[ce-hub] tmux attach -t cehub`);

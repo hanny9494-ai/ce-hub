@@ -64,8 +64,14 @@ def get_tmux_windows():
         return []
 
 
+_token_cache = {"data": None, "time": 0}
+
 def get_claude_token_stats():
-    """Parse Claude Code JSONL sessions for token usage."""
+    """Parse Claude Code JSONL sessions for token usage. Cached for 60s."""
+    now = time.time()
+    if _token_cache["data"] and now - _token_cache["time"] < 60:
+        return _token_cache["data"]
+
     # Find all project dirs that could have sessions
     all_jsonl = []
     for proj in glob.glob(f"{CLAUDE_PROJ_DIR}/*/"):
@@ -109,6 +115,8 @@ def get_claude_token_stats():
             stats["5h"]["output"] += sess_out
             stats["5h"]["sessions"] += 1
 
+    _token_cache["data"] = stats
+    _token_cache["time"] = time.time()
     return stats
 
 

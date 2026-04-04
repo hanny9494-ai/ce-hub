@@ -143,7 +143,12 @@ export class TmuxManager {
     return `claude --model ${claudeModel} --dangerously-skip-permissions ${agentFlag} --append-system-prompt '${escapedAppend}'`;
   }
 
+  private validateName(name: string): void {
+    if (!/^[a-z0-9_-]+$/i.test(name)) throw new Error(`Invalid agent name: ${name}`);
+  }
+
   startAgent(agentName: string): boolean {
+    this.validateName(agentName);
     if (this.isAlive(agentName)) {
       console.log(`[TmuxManager] ${agentName} already running`);
       return true;
@@ -161,6 +166,7 @@ export class TmuxManager {
 
   // Send a message to agent's tmux pane or window (types it + hits enter)
   sendMessage(agentName: string, message: string): void {
+    this.validateName(agentName);
     // Try pane first (agent running in main window pane), then window
     const target = this.findAgentTarget(agentName);
     if (!target) {
